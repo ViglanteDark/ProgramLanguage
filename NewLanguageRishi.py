@@ -412,10 +412,10 @@ def run_block(b):
             if MAIN_BODIES and not MERGE_MAINS: raise SyntaxError("Two main cannot coexist")
             MAIN_BODIES.append(body)
             FUNCTIONS['main'] = ([], " , ".join(MAIN_BODIES))
-            print(f"[defined main {len(MAIN_BODIES)}]")
+            # abstraction: store silently, don't print
         else:
             FUNCTIONS[fname]= (params, body)
-            print(f"[defined func {fname}({','.join(params)})]")
+            # abstraction: store silently, don't print
         return
     b=raw
     if b.startswith('switch'):
@@ -544,16 +544,13 @@ def run_code(text):
             buf2 = ""
 
 buf=""
-print("POP with funcs - F/Func/func, main merges if MERGE_MAINS=True")
-print("Type 'run.' to run main if defined")
-print("Paste multiline code, then press Enter on empty line to run all")
+# abstraction: no startup banner prints
 
 while True:
     c=input(">> " if not buf else ".. ")
     if c.strip()=="exit": break
     if c.strip()=="clear." or c.strip()=="clear":
         memory.clear(); FUNCTIONS.clear(); MAIN_BODIES.clear()
-        print("[session deleted - fresh start]")
         buf=""; continue
     if c.strip()=="run." or c.strip()=="run":
         if MAIN_BODIES:
