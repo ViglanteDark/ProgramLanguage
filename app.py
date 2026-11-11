@@ -12,7 +12,6 @@ try:
     print("Loaded OK")
     print("run_block in POP:", 'run_block' in POP)
     print("run_action in POP:", 'run_action' in POP)
-    print("run_code in POP:", 'run_code' in POP)
 except Exception as e:
     print("Load error:", e)
     traceback.print_exc()
@@ -26,7 +25,6 @@ def silent_clear():
         print("Clear error:", e)
 
 def run_pop_code(code):
-    print(f"DEBUG RECEIVED: {repr(code)}", flush=True)
     code = code.strip()
     if not code:
         return "(empty code received)"
@@ -52,22 +50,19 @@ def run_pop_code(code):
         if buf.strip().endswith(','): continue
         chunk = buf.strip()
         buf = ""
-        print(f"DEBUG RUNNING CHUNK: {repr(chunk)}", flush=True)
         try:
             if 'run_block' in POP and callable(POP['run_block']):
                 POP['run_block'](chunk)
-                print(f"DEBUG run_block OK, memory={POP.get('memory')}", flush=True)
             elif 'run_action' in POP:
                 if chunk.endswith('.'): chunk = chunk[:-1]
                 POP['run_action'](chunk)
             else:
-                print("DEBUG: NO run_block / run_action in POP!", flush=True)
+                print("Error: no run_block / run_action in POP!")
         except Exception as e:
-            print(f"DEBUG ERROR in chunk: {e}", flush=True)
-            traceback.print_exc()
+            print(f"Error: {e}")
     if buf.strip():
         try: POP['run_block'](buf)
-        except Exception as e: print(f"DEBUG ERROR leftover: {e}", flush=True)
+        except Exception as e: print(f"Error: {e}")
     return None
 
 class Handler(BaseHTTPRequestHandler):
