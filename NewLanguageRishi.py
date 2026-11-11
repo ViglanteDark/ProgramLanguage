@@ -401,7 +401,6 @@ def run_block(b):
         if '}' in b: b=b+'.'
         else: raise SyntaxError('Need DOT.')
     raw=b[:-1].strip()
-    # NEW: neat if-else style - }, + newline + else  ->  } else (abstraction)
     raw = re.sub(r'\}\s*,\s*else', '} else', raw, flags=re.DOTALL)
     raw = re.sub(r'\}\s*\n\s*else', '} else', raw, flags=re.DOTALL)
     m=re.match(r'^(F|Func|func)\s+([A-Za-z]\w*)\s*(?:\((.*?)\))?\s*:\s*(.*)$', raw, re.DOTALL)
@@ -415,12 +414,15 @@ def run_block(b):
             if MAIN_BODIES and not MERGE_MAINS: raise SyntaxError("Two main cannot coexist")
             MAIN_BODIES.append(body)
             FUNCTIONS['main'] = ([], " , ".join(MAIN_BODIES))
-            # abstraction: store silently, don't print
         else:
             FUNCTIONS[fname]= (params, body)
-            # abstraction: store silently, don't print
         return
     b=raw
+    # for(i=0, i<3, i=i+1): -> for i=0, i<3, i=i+1:
+    if b.startswith('for'):
+        m_paren = re.match(r'for\s*\(\s*(.+?)\s*\)\s*:\s*(.*)$', b, re.DOTALL)
+        if m_paren:
+            b = f"for {m_paren.group(1)}: {m_paren.group(2)}"
     if b.startswith('switch'):
         m=re.match(r'switch\s+(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         switch_val = eval_expr(Lexer(m.group(1)))
@@ -528,34 +530,44 @@ def run_block(b):
             return
     run_action(b)
 
+# --- NEW: multiline-safe splitter ---
+def split_statements(text):
+    stmts=[]; cur=""
+    db=dp=dk=0; in_str=False
+    for idx,c in enumerate(text):
+        if c=='"': in_str = not in_str
+        if not in_str:
+            if c=='{': db+=1
+            elif c=='}': db-=1
+            elif c=='(': dp+=1
+            elif c==')': dp-=1
+            elif c=='[': dk+=1
+            elif c==']': dk-=1
+        cur+=c
+        # '.' is a terminator only if NOT a decimal like 3.5
+        is_decimal = False
+        if c=='.' and idx>0 and idx+1 < len(text):
+            if text[idx-1].isdigit() and text[idx+1].isdigit():
+                is_decimal = True
+        if c=='.' and not in_str and not is_decimal and db==0 and dp==0 and dk==0:
+            if cur.strip(): stmts.append(cur.strip())
+            cur=""
+    if cur.strip(): stmts.append(cur.strip())
+    return stmts
+
 def run_code(text):
-    lines = text.split('\n')
-    buf2 = ""
-    for line in lines:
-        line = line.strip()
-        if not line: continue
-        buf2 = line if not buf2 else buf2 + "\n" + line
-        if buf2.count('{') > buf2.count('}'): continue
-        if buf2.strip().endswith(','): continue
-        if buf2.strip().endswith('.') or buf2.strip().endswith('='):
-            try: run_block(buf2)
-            except Exception as e: print("Error:", e)
-            buf2 = ""
-        elif buf2.count('{') == buf2.count('}'):
-            try: run_block(buf2 + '.')
-            except Exception as e: print("Error:", e)
-            buf2 = ""
+    for s in split_statements(text):
+        try: run_block(s)
+        except Exception as e: print("Error:", e)
 
 buf=""
-# abstraction: no startup banner prints
-
 while True:
     c=input(">> " if not buf else ".. ")
     if c.strip()=="exit": break
-    if c.strip()=="clear." or c.strip()=="clear":
+    if c.strip() in ("clear.", "clear"):
         memory.clear(); FUNCTIONS.clear(); MAIN_BODIES.clear()
         buf=""; continue
-    if c.strip()=="run." or c.strip()=="run":
+    if c.strip() in ("run.", "run"):
         if MAIN_BODIES:
             try:
                 _, merged = FUNCTIONS['main']
@@ -566,13 +578,10 @@ while True:
             print("No main - top-level code already runs")
         continue
     if c.strip()=="" and buf:
-        run_code(buf)
-        buf=""
-        continue
-    buf=c if not buf else buf+"\n"+c
-    if buf.count('{')>buf.count('}'): continue
-    if buf.strip().endswith(','): continue
-    if buf.strip().endswith('.') and '\n' not in buf.strip():
-        try: run_block(buf)
-        except Exception as e: print("Error:",e)
-        buf=""
+        run_code(buf); buf=""; continue
+    buf = c if not buf else buf + "\n" + c
+    # Run only when buf is a complete statement (ends with . at depth 0)
+    if buf.strip().endswith('.'):
+        stmts = split_statements(buf)
+        if stmts and buf.strip() == stmts[-1]:
+            run_code(buf); buf=""
