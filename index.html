@@ -64,7 +64,7 @@ button{cursor:pointer}
 let files = JSON.parse(localStorage.getItem('pop_files') || 'null');
 if(!files){
   files = {
-    'main': 'print("Hello POP!")',
+    'main': 'print"Hello POP!".',
     'hello': 'print"Hello from POP".',
     'calc': 'print(sqrt(16))\nprint(2 + 3)'
   };
@@ -109,7 +109,7 @@ document.getElementById('newFileBtn').onclick=()=>{
   if(!n) return; n=n.trim().replace(/\.[a-z0-9]+$/i,'');
   if(!n) return;
   if(files[n]){ alert('Already exists'); switchFile(n); return; }
-  files[n]='print("Hello from '+n+'")';
+  files[n]='print"Hello from '+n+'".';
   current=n; save(); renderList();
 };
 codeEl.addEventListener('input',()=>{ files[current]=codeEl.value; save(); document.getElementById('charCount').textContent=codeEl.value.length+' chars'; });
