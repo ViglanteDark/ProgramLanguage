@@ -84,7 +84,30 @@ def exec_input_tokens(toks_nodot):
     return memory[var_name]
 
 def get_stmts(body):
-    parts = re.split(r',|\n', body)
+    # Depth-aware split: comma inside () [] {} = argument, NOT new statement
+    # comma at depth 0 = new statement
+    parts=[]
+    cur=""
+    depth_paren=0
+    depth_brack=0
+    depth_brace=0
+    i=0
+    while i < len(body):
+        c=body[i]
+        if c=='(': depth_paren+=1
+        elif c==')': depth_paren-=1
+        elif c=='[': depth_brack+=1
+        elif c==']': depth_brack-=1
+        elif c=='{': depth_brace+=1
+        elif c=='}': depth_brace-=1
+        # split only when ALL depths are 0
+        if (c==',' or c=='\n') and depth_paren==0 and depth_brack==0 and depth_brace==0:
+            parts.append(cur); cur=""
+        else:
+            cur+=c
+        i+=1
+    if cur.strip(): parts.append(cur)
+
     out=[]
     for p in parts:
         p=p.strip()
