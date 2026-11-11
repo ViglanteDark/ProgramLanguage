@@ -1,54 +1,91 @@
-# app.py - POP Server, only built-in Python, no Flask, no pip
+# app.py - POP Server, only built-in Python
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-import os
-import traceback
-import io
-import sys
+import json, os, traceback, io, sys
 
-# Load YOUR core file WITHOUT running its REPL
 POP = {}
 try:
     with open("NewLanguageRishi.py", "r", encoding="utf-8") as f:
-        lines = f.readlines()
-    clean_lines = []
-    for line in lines:
-        if 'POP with funcs' in line:
-            break
-        clean_lines.append(line)
-    pop_code = "".join(clean_lines)
-    exec(pop_code, POP)
-    print("Loaded NewLanguageRishi.py libraries (REPL skipped)")
-    print("Has run_code:", 'run_code' in POP, "Has clear_session:", 'clear_session' in POP)
+        code_text = f.read()
+    # Cut ONLY the REPL loop at the very end - keep ALL functions
+    # REPL starts at the line: buf=""
+    # Find last occurrence of "\nbuf=\"\"\n"
+    idx = code_text.rfind('\nbuf=""\n')
+    if idx != -1:
+        code_text = code_text[:idx]
+    exec(code_text, POP)
+    print("Loaded OK")
+    print("run_block in POP:", 'run_block' in POP)
+    print("run_action in POP:", 'run_action' in POP)
+    print("run_code in POP:", 'run_code' in POP)
 except Exception as e:
-    print(f"Error loading NewLanguageRishi.py: {e}")
+    print("Load error:", e)
     traceback.print_exc()
 
 def silent_clear():
-    # Delete session WITHOUT printing "[session deleted]" into output
     try:
-        if 'memory' in POP and isinstance(POP['memory'], dict):
-            POP['memory'].clear()
-        if 'FUNCTIONS' in POP and isinstance(POP['FUNCTIONS'], dict):
-            POP['FUNCTIONS'].clear()
-        if 'MAIN_BODIES' in POP and isinstance(POP['MAIN_BODIES'], list):
-            POP['MAIN_BODIES'].clear()
+        if isinstance(POP.get('memory'), dict): POP['memory'].clear()
+        if isinstance(POP.get('FUNCTIONS'), dict): POP['FUNCTIONS'].clear()
+        if isinstance(POP.get('MAIN_BODIES'), list): POP['MAIN_BODIES'].clear()
     except Exception as e:
         print("Clear error:", e)
 
 def run_pop_code(code):
-    # FIX: Use run_code for multiline, NOT run_block
-    # run_code handles: multiline, comma, { } blocks, functions
-    if 'run_code' in POP and callable(POP['run_code']):
-        return POP['run_code'](code)
-    if 'run_block' in POP and callable(POP['run_block']):
-        # Fallback: split lines and run each
-        for line in code.split('\n'):
-            line = line.strip()
-            if line:
-                POP['run_block'](line)
+    # NEW: Do NOT call POP['run_code'] - it is broken.
+    # We split multiline OURSELVES and call POP['run_block'] per chunk.
+    code = code.strip()
+    if not code:
         return None
-    return "Error: Could not find run_code / run_block in NewLanguageRishi.py"
+    # Handle clear / run specially
+    if code.strip() in ("clear.", "clear"):
+        silent_clear()
+        return "[session deleted - fresh start]"
+    if code.strip() in ("run.", "run"):
+        # run main if exists
+        if POP.get('MAIN_BODIES'):
+            try:
+                _, merged = POP['FUNCTIONS']['main']
+                for s in POP['get_stmts'](merged):
+                    POP['run_action'](s)
+            except Exception as e:
+                print("Error in main:", e)
+        return None
+
+    # Split into chunks, keep { } together
+    lines = code.split('\n')
+    buf = ""
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        buf = line if not buf else buf + "\n" + line
+        # Wait if { not closed
+        if buf.count('{') > buf.count('}'):
+            continue
+        # Wait if ends with comma
+        if buf.strip().endswith(','):
+            continue
+        # Now run this one chunk
+        chunk = buf.strip()
+        buf = ""
+        try:
+            if 'run_block' in POP and callable(POP['run_block']):
+                POP['run_block'](chunk)
+            elif 'run_action' in POP:
+                # fallback: strip dot and use run_action
+                if chunk.endswith('.'):
+                    chunk = chunk[:-1]
+                POP['run_action'](chunk)
+            else:
+                print("Error: no run_block / run_action found")
+        except Exception as e:
+            print(f"Error: {e}")
+    # If leftover buf (unclosed {), try once
+    if buf.strip():
+        try:
+            POP['run_block'](buf)
+        except Exception as e:
+            print(f"Error: {e}")
+    return None
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, text, code=200, ctype="text/html"):
@@ -68,14 +105,11 @@ class Handler(BaseHTTPRequestHandler):
         if filename in ["index.html", "style.css", "script.js"]:
             if os.path.exists(filename):
                 ctype = "text/html"
-                if filename.endswith(".css"):
-                    ctype = "text/css"
-                if filename.endswith(".js"):
-                    ctype = "application/javascript"
+                if filename.endswith(".css"): ctype = "text/css"
+                if filename.endswith(".js"): ctype = "application/javascript"
                 with open(filename, "r", encoding="utf-8") as f:
                     self._send(f.read(), 200, ctype)
                 return
-        # NEW: GET /clear also works
         if path == "/clear":
             silent_clear()
             self._send(json.dumps({"output": "[session deleted - fresh start]"}), 200, "application/json")
@@ -104,8 +138,6 @@ class Handler(BaseHTTPRequestHandler):
                     output += str(result)
                 if output.strip() == "":
                     output = "(no output)"
-                # === DELETE SESSION AFTER EACH USE ===
-                # So next run sees everything fresh, no old variables
                 silent_clear()
                 self._send(json.dumps({"output": output}), 200, "application/json")
             except Exception as e:
@@ -113,12 +145,10 @@ class Handler(BaseHTTPRequestHandler):
                 silent_clear()
                 self._send(json.dumps({"output": f"Error: {e}"}), 200, "application/json")
             return
-
         if self.path == "/clear":
             silent_clear()
             self._send(json.dumps({"output": "[session deleted - fresh start]"}), 200, "application/json")
             return
-
         self._send("Not found", 404, "text/plain")
 
     def do_OPTIONS(self):
@@ -134,5 +164,4 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"POP Server running on http://localhost:{port}")
-    print("Your libraries from NewLanguageRishi.py are loaded.")
     HTTPServer(("0.0.0.0", port), Handler).serve_forever()
