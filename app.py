@@ -30,25 +30,41 @@ def silent_clear():
         print("Clear error:", e)
 
 def run_pop_code(code):
-    # NEW: Do NOT call POP['run_code'] - it is broken.
-    # We split multiline OURSELVES and call POP['run_block'] per chunk.
+    print(f"DEBUG RECEIVED: {repr(code)}", flush=True)  # goes to Render logs, NOT to user
     code = code.strip()
     if not code:
-        return None
-    # Handle clear / run specially
+        print("DEBUG: code was EMPTY!", flush=True)
+        return "(empty code received)"
     if code.strip() in ("clear.", "clear"):
         silent_clear()
         return "[session deleted - fresh start]"
-    if code.strip() in ("run.", "run"):
-        # run main if exists
-        if POP.get('MAIN_BODIES'):
-            try:
-                _, merged = POP['FUNCTIONS']['main']
-                for s in POP['get_stmts'](merged):
-                    POP['run_action'](s)
-            except Exception as e:
-                print("Error in main:", e)
-        return None
+    lines = code.split('\n')
+    buf = ""
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line: continue
+        buf = line if not buf else buf + "\n" + line
+        if buf.count('{') > buf.count('}'): continue
+        if buf.strip().endswith(','): continue
+        chunk = buf.strip()
+        buf = ""
+        print(f"DEBUG RUNNING CHUNK: {repr(chunk)}", flush=True)
+        try:
+            if 'run_block' in POP:
+                POP['run_block'](chunk)
+                print(f"DEBUG run_block OK, memory={POP.get('memory')}", flush=True)
+            elif 'run_action' in POP:
+                if chunk.endswith('.'): chunk = chunk[:-1]
+                POP['run_action'](chunk)
+            else:
+                print("DEBUG: NO run_block / run_action in POP!", flush=True)
+        except Exception as e:
+            print(f"DEBUG ERROR in chunk: {e}", flush=True)
+            import traceback; traceback.print_exc()
+    if buf.strip():
+        try: POP['run_block'](buf)
+        except Exception as e: print(f"DEBUG ERROR leftover: {e}", flush=True)
+    return None
 
     # Split into chunks, keep { } together
     lines = code.split('\n')
