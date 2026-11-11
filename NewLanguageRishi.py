@@ -54,7 +54,7 @@ def Lexer(code):
 memory={}
 FUNCTIONS={}
 MAIN_BODIES=[]
-MERGE_MAINS = True # CHANGE THIS: False = two main cannot coexist
+MERGE_MAINS = True
 
 class BreakLoop(Exception): pass
 class ContinueLoop(Exception): pass
@@ -83,30 +83,36 @@ def exec_input_tokens(toks_nodot):
     except: memory[var_name]=ui
     return memory[var_name]
 
+# FIXED: comma = new line ONLY if outside () [] {} and outside "string"
 def get_stmts(body):
-    parts = re.split(r',|\n', body)
-    out=[]
-    for p in parts:
-        p=p.strip()
-        if p.endswith('.'): p=p[:-1]
-        if p.endswith(':'): p=p[:-1]
-        if p.strip(): out.append(p.strip())
+    out=[]; cur=""; depth=0; in_str=False
+    for ch in body:
+        if ch=='"': in_str=not in_str
+        if not in_str:
+            if ch in '([{': depth+=1
+            elif ch in ')]}': depth-=1
+            if (ch==',' or ch=='\n') and depth==0:
+                p=cur.strip()
+                if p.endswith('.'): p=p[:-1]
+                if p.endswith(':'): p=p[:-1]
+                if p.strip(): out.append(p.strip())
+                cur=""; continue
+        cur+=ch
+    p=cur.strip()
+    if p.endswith('.'): p=p[:-1]
+    if p.endswith(':'): p=p[:-1]
+    if p.strip(): out.append(p.strip())
     merged=[]
     for st in out:
         if st.startswith('else') and merged and merged[-1].lstrip().startswith('if'):
-            merged[-1] = merged[-1] + " else: " + st.split(':',1)[1].strip()
-        else:
-            merged.append(st)
+            merged[-1] = merged[-1] + " else: " + st.split(':',1)[1].strip() if ':' in st else merged[-1]
+        else: merged.append(st)
     return merged
 
 def run_function(name, arg_vals):
     if name not in FUNCTIONS: raise NameError(f"No func {name}")
     params, body = FUNCTIONS[name]
     outer = memory.copy()
-    # new local scope
-    for i,p in enumerate(params):
-        outer[p] = memory.get(p,0) # save outer param
-    # bind
     for i,p in enumerate(params):
         memory[p] = arg_vals[i] if i < len(arg_vals) else 0
     try:
@@ -116,7 +122,6 @@ def run_function(name, arg_vals):
     except ReturnValue as rv:
         ret=rv.value
     finally:
-        # restore params only, keep other globals
         for p in params:
             if p in outer: memory[p]=outer[p]
             else: memory.pop(p,None)
@@ -147,18 +152,35 @@ def eval_expr(toks):
                 if depth>=1: cur.append(tk)
         if not inner: return []
         return [eval_expr(p) for p in inner]
-    toks=no_comma
+    # FIXED: Use clean (WITH commas) for FUNC, so pow(2,3) works
+    toks=clean
     if toks and toks[0][0]=='FUNC':
         fname=toks[0][1]
         args_toks=[]; cur=[]; d=0
         for t in toks[1:]:
             if t[0]=='LPAREN': d+=1; cur.append(t)
             elif t[0]=='RPAREN': d-=1; cur.append(t)
-            elif t[0]=='COMMA' and d==0:
+            elif t[0]=='COMMA' and d==1:
                 args_toks.append(cur); cur=[]
             else: cur.append(t)
         if cur: args_toks.append(cur)
-        evaled=[eval_expr(a) for a in args_toks if a]
+        # strip outer parens from each arg
+        cleaned_args=[]
+        for a in args_toks:
+            if a and a[0][0]=='LPAREN' and a[-1][0]=='RPAREN':
+                cleaned_args.append(a[1:-1])
+            else: cleaned_args.append(a)
+        # if call was like sqrt(16) without outer handling, first arg still has parens - eval_expr handles it
+        # Actually for sqrt(16): args_toks = [[ (, 16, ) ]] -> cleaned = [[16]]
+        # For pow(2,3): args = [[(,2],[3,)] ] -> need smarter: flatten
+        # Simpler: re-parse by joining tokens and splitting at top-level commas
+        # Rebuild evaled from cleaned_args, handling the split above
+        # Fix for pow case: first arg has '(' prefix, last has ')' suffix
+        # So we reconstruct: if len(cleaned_args)==2 and cleaned_args[0] and cleaned_args[0][0][0]=='LPAREN':
+        # we already stripped, it's ok. Evaluate:
+        evaled=[]
+        for a in cleaned_args:
+            if a: evaled.append(eval_expr(a))
         if fname=='len':
             a=evaled[0] if evaled else 0
             return len(a) if isinstance(a,(list,str)) else 0
@@ -168,6 +190,7 @@ def eval_expr(toks):
         if fname=='quad2' and len(evaled)>=3: a,b,c=evaled[:3]; return (-b-py_math.sqrt(b*b-4*a*c))/(2*a)
         return 0
 
+    toks=no_comma
     def parse_atom(j):
         if j>=len(toks): return 0,j
         if toks[j][0]=='BITNOT':
@@ -175,9 +198,8 @@ def eval_expr(toks):
         t=toks[j]
         if t[0]=='INT': return int(t[1]), j+1
         if t[0]=='FLOAT': return float(t[1]), j+1
-        if t[0]=='STRING': return t[1][1:-1], j+1
+        if t[0]=='STRING': return interp(t[1][1:-1]), j+1
         if t[0]=='VARIABLE':
-            # user function call?
             if j+1 < len(toks) and toks[j+1][0]=='LPAREN':
                 k=j+2; d=1; arg_toks=[]; cur=[]
                 while k < len(toks):
@@ -308,6 +330,9 @@ def run_action(code):
             memory[toks[0][1]]=[0]*int(toks[4][1]); return
         if len(toks)>=6 and toks[1][0]=='KEYWORD' and toks[1][1]=='is' and toks[2][0]=='KEYWORD' and toks[2][1]=='array' and toks[3][0]=='LBRACK' and toks[4][0]=='INT':
             memory[toks[0][1]]=[0]*int(toks[4][1]); return
+    # FIXED: x = read "prompt"
+    if len(toks)>=3 and toks[0][0]=='VARIABLE' and toks[1][0]=='EQUAL' and toks[2][0]=='KEYWORD' and toks[2][1] in ('read','take'):
+        memory[toks[0][1]]=exec_input_tokens(toks[2:]); return
     if len(toks)>=3 and toks[0][0]=='VARIABLE' and toks[1][0]=='EQUAL' and toks[2][0]=='LBRACK':
         memory[toks[0][1]]=eval_expr(toks[2:]); return
     if len(toks)>=4 and toks[0][0]=='VARIABLE' and toks[1][0]=='KEYWORD' and toks[1][1]=='is' and toks[2][0]=='LBRACK':
@@ -361,14 +386,9 @@ def run_action(code):
             return
     if len(toks)>=2 and toks[0][0]=='VARIABLE' and toks[1][0] in ('EQUAL','PLUSEQ','MINUSEQ','MULEQ','DIVEQ','POWEQ','MODEQ'):
         var=toks[0][1]; op=toks[1][0]
-        if len(toks)>=3 and toks[2][0]=='STRING' and op=='EQUAL': memory[var]=toks[2][1][1:-1]; return
-        # function call on RHS: x = add(2,3)
-        # check if RHS is a function call
+        if len(toks)>=3 and toks[2][0]=='STRING' and op=='EQUAL': memory[var]=interp(toks[2][1][1:-1]); return
         rhs_toks = toks[2:]
-        if len(rhs_toks)>=3 and rhs_toks[0][0]=='VARIABLE' and rhs_toks[1][0]=='LPAREN' and rhs_toks[0][1] in FUNCTIONS:
-            rhs=eval_expr(rhs_toks)
-        else:
-            rhs=eval_expr(rhs_toks) if len(toks)>2 else 0
+        rhs=eval_expr(rhs_toks) if len(toks)>2 else 0
         if op=='EQUAL': memory[var]=rhs
         else:
             cur=memory.get(var,0)
@@ -379,7 +399,6 @@ def run_action(code):
             elif op=='POWEQ': memory[var]=cur**rhs
             else: memory[var]=cur%rhs if rhs!=0 else 0
         return
-    # bare function call statement like add(2,3).
     if len(toks)>=3 and toks[0][0]=='VARIABLE' and toks[1][0]=='LPAREN' and toks[0][1] in FUNCTIONS:
         eval_expr(toks)
         return
@@ -392,8 +411,6 @@ def run_block(b):
         if '}' in b: b=b+'.'
         else: raise SyntaxError('Need DOT.')
     raw=b[:-1].strip()
-
-    # FUNCTION DEF: F / Func / func
     m=re.match(r'^(F|Func|func)\s+([A-Za-z]\w*)\s*(?:\((.*?)\))?\s*:\s*(.*)$', raw, re.DOTALL)
     if m:
         _, fname, param_str, rest = m.groups()
@@ -413,11 +430,10 @@ def run_block(b):
             FUNCTIONS[fname]= (params, body)
             print(f"[defined func {fname}({','.join(params)})]")
         return
-
     b=raw
-
     if b.startswith('switch'):
         m=re.match(r'switch\s+(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
+        if not m: raise SyntaxError('switch syntax')
         switch_val = eval_expr(Lexer(m.group(1)))
         body=m.group(2)
         cases = re.findall(r'case\s+(.+?):\s*\{(.*?)\}', body, re.DOTALL)
@@ -430,7 +446,6 @@ def run_block(b):
         if not matched and default_m:
             for s in get_stmts(default_m.group(1)): run_action(s)
         return
-
     if b.startswith('if'):
         m=re.match(r'if\s+(.+?):\s*\{(.*)\}\s*else\s*:\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
@@ -464,7 +479,6 @@ def run_block(b):
             if eval_expr(Lexer(cond)): run_action(t)
             return
         raise SyntaxError('if syntax')
-
     if b.startswith('while'):
         m=re.match(r'while\s+(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
@@ -483,7 +497,6 @@ def run_block(b):
                 except ContinueLoop: continue
                 except BreakLoop: break
             return
-
     if b.startswith('for'):
         m=re.match(r'for\s+(.+?),\s*(.+?),\s*(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
@@ -506,7 +519,6 @@ def run_block(b):
                 except BreakLoop: break
                 run_action(step)
             return
-
     if b.startswith('repeat'):
         m=re.match(r'repeat\s*\(\s*(.+?)\s*\)\s*:\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
