@@ -7,36 +7,48 @@ import io
 import sys
 
 # Load YOUR core file WITHOUT running its REPL
-# Load YOUR core file WITHOUT running its REPL
 POP = {}
 try:
     with open("NewLanguageRishi.py", "r", encoding="utf-8") as f:
         lines = f.readlines()
-    # Keep only lines BEFORE the REPL starts
-    # Stop at the first line that contains the REPL marker
     clean_lines = []
     for line in lines:
         if 'POP with funcs' in line:
             break
-        # Also stop if we see the REPL loop starting
-        if 'while True' in line and 'POP' in line:
-            break
         clean_lines.append(line)
     pop_code = "".join(clean_lines)
-    # Safety: if last line is a broken print(, drop it
-    if pop_code.rstrip().endswith('print("'):
-        pop_code = pop_code.rstrip()[:-8]
     exec(pop_code, POP)
     print("Loaded NewLanguageRishi.py libraries (REPL skipped)")
+    print("Has run_code:", 'run_code' in POP, "Has clear_session:", 'clear_session' in POP)
 except Exception as e:
     print(f"Error loading NewLanguageRishi.py: {e}")
     traceback.print_exc()
 
+def silent_clear():
+    # Delete session WITHOUT printing "[session deleted]" into output
+    try:
+        if 'memory' in POP and isinstance(POP['memory'], dict):
+            POP['memory'].clear()
+        if 'FUNCTIONS' in POP and isinstance(POP['FUNCTIONS'], dict):
+            POP['FUNCTIONS'].clear()
+        if 'MAIN_BODIES' in POP and isinstance(POP['MAIN_BODIES'], list):
+            POP['MAIN_BODIES'].clear()
+    except Exception as e:
+        print("Clear error:", e)
+
 def run_pop_code(code):
-    for name in ['run_block', 'run_code', 'run', 'execute']:
-        if name in POP and callable(POP[name]):
-            return POP[name](code)
-    return "Error: Could not find run_block / run_code in NewLanguageRishi.py"
+    # FIX: Use run_code for multiline, NOT run_block
+    # run_code handles: multiline, comma, { } blocks, functions
+    if 'run_code' in POP and callable(POP['run_code']):
+        return POP['run_code'](code)
+    if 'run_block' in POP and callable(POP['run_block']):
+        # Fallback: split lines and run each
+        for line in code.split('\n'):
+            line = line.strip()
+            if line:
+                POP['run_block'](line)
+        return None
+    return "Error: Could not find run_code / run_block in NewLanguageRishi.py"
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, text, code=200, ctype="text/html"):
@@ -49,7 +61,6 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        # Serve index.html, style.css, script.js
         path = self.path
         if path == "/":
             path = "/index.html"
@@ -64,6 +75,11 @@ class Handler(BaseHTTPRequestHandler):
                 with open(filename, "r", encoding="utf-8") as f:
                     self._send(f.read(), 200, ctype)
                 return
+        # NEW: GET /clear also works
+        if path == "/clear":
+            silent_clear()
+            self._send(json.dumps({"output": "[session deleted - fresh start]"}), 200, "application/json")
+            return
         self._send("Not found", 404, "text/plain")
 
     def do_POST(self):
@@ -88,12 +104,22 @@ class Handler(BaseHTTPRequestHandler):
                     output += str(result)
                 if output.strip() == "":
                     output = "(no output)"
+                # === DELETE SESSION AFTER EACH USE ===
+                # So next run sees everything fresh, no old variables
+                silent_clear()
                 self._send(json.dumps({"output": output}), 200, "application/json")
             except Exception as e:
                 traceback.print_exc()
+                silent_clear()
                 self._send(json.dumps({"output": f"Error: {e}"}), 200, "application/json")
-        else:
-            self._send("Not found", 404, "text/plain")
+            return
+
+        if self.path == "/clear":
+            silent_clear()
+            self._send(json.dumps({"output": "[session deleted - fresh start]"}), 200, "application/json")
+            return
+
+        self._send("Not found", 404, "text/plain")
 
     def do_OPTIONS(self):
         self.send_response(200)
