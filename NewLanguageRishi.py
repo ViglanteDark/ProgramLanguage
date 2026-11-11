@@ -54,7 +54,7 @@ def Lexer(code):
 memory={}
 FUNCTIONS={}
 MAIN_BODIES=[]
-MERGE_MAINS = True # CHANGE THIS: False = two main cannot coexist
+MERGE_MAINS = True
 
 class BreakLoop(Exception): pass
 class ContinueLoop(Exception): pass
@@ -103,10 +103,8 @@ def run_function(name, arg_vals):
     if name not in FUNCTIONS: raise NameError(f"No func {name}")
     params, body = FUNCTIONS[name]
     outer = memory.copy()
-    # new local scope
     for i,p in enumerate(params):
-        outer[p] = memory.get(p,0) # save outer param
-    # bind
+        outer[p] = memory.get(p,0)
     for i,p in enumerate(params):
         memory[p] = arg_vals[i] if i < len(arg_vals) else 0
     try:
@@ -116,7 +114,6 @@ def run_function(name, arg_vals):
     except ReturnValue as rv:
         ret=rv.value
     finally:
-        # restore params only, keep other globals
         for p in params:
             if p in outer: memory[p]=outer[p]
             else: memory.pop(p,None)
@@ -167,7 +164,6 @@ def eval_expr(toks):
         if fname=='quad1' and len(evaled)>=3: a,b,c=evaled[:3]; return (-b+py_math.sqrt(b*b-4*a*c))/(2*a)
         if fname=='quad2' and len(evaled)>=3: a,b,c=evaled[:3]; return (-b-py_math.sqrt(b*b-4*a*c))/(2*a)
         return 0
-
     def parse_atom(j):
         if j>=len(toks): return 0,j
         if toks[j][0]=='BITNOT':
@@ -177,7 +173,6 @@ def eval_expr(toks):
         if t[0]=='FLOAT': return float(t[1]), j+1
         if t[0]=='STRING': return t[1][1:-1], j+1
         if t[0]=='VARIABLE':
-            # user function call?
             if j+1 < len(toks) and toks[j+1][0]=='LPAREN':
                 k=j+2; d=1; arg_toks=[]; cur=[]
                 while k < len(toks):
@@ -219,7 +214,6 @@ def eval_expr(toks):
                 inner.append(toks[k]); k+=1
             return eval_expr(inner), k+1
         return 0,j+1
-
     def parse_pow(j):
         v,j=parse_atom(j)
         if j<len(toks) and toks[j][0]=='POW': rv,j=parse_pow(j+1); return v**rv, j
@@ -293,8 +287,7 @@ def run_action(code):
     if code=="continue": raise ContinueLoop()
     if code.lower().startswith("return"):
         toks=Lexer(code)
-        if len(toks)>1:
-            val=eval_expr(toks[1:])
+        if len(toks)>1: val=eval_expr(toks[1:])
         else: val=0
         raise ReturnValue(val)
     if code.startswith(('if','while','for','repeat','switch')):
@@ -362,8 +355,6 @@ def run_action(code):
     if len(toks)>=2 and toks[0][0]=='VARIABLE' and toks[1][0] in ('EQUAL','PLUSEQ','MINUSEQ','MULEQ','DIVEQ','POWEQ','MODEQ'):
         var=toks[0][1]; op=toks[1][0]
         if len(toks)>=3 and toks[2][0]=='STRING' and op=='EQUAL': memory[var]=toks[2][1][1:-1]; return
-        # function call on RHS: x = add(2,3)
-        # check if RHS is a function call
         rhs_toks = toks[2:]
         if len(rhs_toks)>=3 and rhs_toks[0][0]=='VARIABLE' and rhs_toks[1][0]=='LPAREN' and rhs_toks[0][1] in FUNCTIONS:
             rhs=eval_expr(rhs_toks)
@@ -379,7 +370,6 @@ def run_action(code):
             elif op=='POWEQ': memory[var]=cur**rhs
             else: memory[var]=cur%rhs if rhs!=0 else 0
         return
-    # bare function call statement like add(2,3).
     if len(toks)>=3 and toks[0][0]=='VARIABLE' and toks[1][0]=='LPAREN' and toks[0][1] in FUNCTIONS:
         eval_expr(toks)
         return
@@ -392,20 +382,15 @@ def run_block(b):
         if '}' in b: b=b+'.'
         else: raise SyntaxError('Need DOT.')
     raw=b[:-1].strip()
-
-    # FUNCTION DEF: F / Func / func
     m=re.match(r'^(F|Func|func)\s+([A-Za-z]\w*)\s*(?:\((.*?)\))?\s*:\s*(.*)$', raw, re.DOTALL)
     if m:
         _, fname, param_str, rest = m.groups()
         rest=rest.strip()
-        if rest.startswith('{') and rest.endswith('}'):
-            body=rest[1:-1]
-        else:
-            body=rest
+        if rest.startswith('{') and rest.endswith('}'): body=rest[1:-1]
+        else: body=rest
         params=[p.strip() for p in param_str.split(',') if p.strip()] if param_str else []
         if fname.lower() == 'main':
-            if MAIN_BODIES and not MERGE_MAINS:
-                raise SyntaxError("Two main cannot coexist")
+            if MAIN_BODIES and not MERGE_MAINS: raise SyntaxError("Two main cannot coexist")
             MAIN_BODIES.append(body)
             FUNCTIONS['main'] = ([], " , ".join(MAIN_BODIES))
             print(f"[defined main {len(MAIN_BODIES)}]")
@@ -413,9 +398,7 @@ def run_block(b):
             FUNCTIONS[fname]= (params, body)
             print(f"[defined func {fname}({','.join(params)})]")
         return
-
     b=raw
-
     if b.startswith('switch'):
         m=re.match(r'switch\s+(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         switch_val = eval_expr(Lexer(m.group(1)))
@@ -430,7 +413,6 @@ def run_block(b):
         if not matched and default_m:
             for s in get_stmts(default_m.group(1)): run_action(s)
         return
-
     if b.startswith('if'):
         m=re.match(r'if\s+(.+?):\s*\{(.*)\}\s*else\s*:\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
@@ -464,17 +446,25 @@ def run_block(b):
             if eval_expr(Lexer(cond)): run_action(t)
             return
         raise SyntaxError('if syntax')
-
-        if b.startswith('while'):
+    if b.startswith('while'):
         m=re.match(r'while\s+(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
-            ...
+            cond,body=m.groups()
+            while eval_expr(Lexer(cond)):
+                try:
+                    for s in get_stmts(body): run_action(s)
+                except ContinueLoop: continue
+                except BreakLoop: break
             return
         m=re.match(r'while\s+(.+?):\s*(.+)\s*$', b, re.DOTALL)
         if m:
-            ...
+            cond,single=m.groups()
+            while eval_expr(Lexer(cond)):
+                try: run_action(single)
+                except ContinueLoop: continue
+                except BreakLoop: break
             return
-            if b.startswith('for'):
+    if b.startswith('for'):
         m=re.match(r'for\s+(.+?),\s*(.+?),\s*(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
             init,cond,step,body=m.groups()
@@ -514,5 +504,56 @@ def run_block(b):
                 except ContinueLoop: continue
                 except BreakLoop: break
             return
-    # === THIS LINE WAS MISSING - THIS IS THE FIX ===
     run_action(b)
+
+def run_code(text):
+    lines = text.split('\n')
+    buf2 = ""
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        buf2 = line if not buf2 else buf2 + "\n" + line
+        if buf2.count('{') > buf2.count('}'): continue
+        if buf2.strip().endswith(','): continue
+        if buf2.strip().endswith('.') or buf2.strip().endswith('='):
+            try: run_block(buf2)
+            except Exception as e: print("Error:", e)
+            buf2 = ""
+        elif buf2.count('{') == buf2.count('}'):
+            try: run_block(buf2 + '.')
+            except Exception as e: print("Error:", e)
+            buf2 = ""
+
+buf=""
+print("POP with funcs - F/Func/func, main merges if MERGE_MAINS=True")
+print("Type 'run.' to run main if defined")
+print("Paste multiline code, then press Enter on empty line to run all")
+
+while True:
+    c=input(">> " if not buf else ".. ")
+    if c.strip()=="exit": break
+    if c.strip()=="clear." or c.strip()=="clear":
+        memory.clear(); FUNCTIONS.clear(); MAIN_BODIES.clear()
+        print("[session deleted - fresh start]")
+        buf=""; continue
+    if c.strip()=="run." or c.strip()=="run":
+        if MAIN_BODIES:
+            try:
+                _, merged = FUNCTIONS['main']
+                for s in get_stmts(merged): run_action(s)
+            except ReturnValue: pass
+            except Exception as e: print("Error in main:",e)
+        else:
+            print("No main - top-level code already runs")
+        continue
+    if c.strip()=="" and buf:
+        run_code(buf)
+        buf=""
+        continue
+    buf=c if not buf else buf+"\n"+c
+    if buf.count('{')>buf.count('}'): continue
+    if buf.strip().endswith(','): continue
+    if buf.strip().endswith('.') and '\n' not in buf.strip():
+        try: run_block(buf)
+        except Exception as e: print("Error:",e)
+        buf=""
