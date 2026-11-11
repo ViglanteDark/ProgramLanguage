@@ -401,6 +401,9 @@ def run_block(b):
         if '}' in b: b=b+'.'
         else: raise SyntaxError('Need DOT.')
     raw=b[:-1].strip()
+    # NEW: neat if-else style - }, + newline + else  ->  } else (abstraction)
+    raw = re.sub(r'\}\s*,\s*else', '} else', raw, flags=re.DOTALL)
+    raw = re.sub(r'\}\s*\n\s*else', '} else', raw, flags=re.DOTALL)
     m=re.match(r'^(F|Func|func)\s+([A-Za-z]\w*)\s*(?:\((.*?)\))?\s*:\s*(.*)$', raw, re.DOTALL)
     if m:
         _, fname, param_str, rest = m.groups()
