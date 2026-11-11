@@ -474,4 +474,45 @@ def run_block(b):
         if m:
             ...
             return
-        # <-- FILE STOPS HERE, NOTHING AFTER
+            if b.startswith('for'):
+        m=re.match(r'for\s+(.+?),\s*(.+?),\s*(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
+        if m:
+            init,cond,step,body=m.groups()
+            run_action(init)
+            while eval_expr(Lexer(cond)):
+                try:
+                    for s in get_stmts(body): run_action(s)
+                except ContinueLoop: pass
+                except BreakLoop: break
+                run_action(step)
+            return
+        m=re.match(r'for\s+(.+?),\s*(.+?),\s*(.+?):\s*(.+)\s*$', b, re.DOTALL)
+        if m:
+            init,cond,step,single=m.groups()
+            run_action(init)
+            while eval_expr(Lexer(cond)):
+                try: run_action(single)
+                except ContinueLoop: pass
+                except BreakLoop: break
+                run_action(step)
+            return
+    if b.startswith('repeat'):
+        m=re.match(r'repeat\s*\(\s*(.+?)\s*\)\s*:\s*\{(.*)\}\s*$', b, re.DOTALL)
+        if m:
+            times=int(eval_expr(Lexer(m.group(1))))
+            for _ in range(times):
+                try:
+                    for s in get_stmts(m.group(2)): run_action(s)
+                except ContinueLoop: continue
+                except BreakLoop: break
+            return
+        m=re.match(r'repeat\s*\(\s*(.+?)\s*\)\s*:\s*(.+)\s*$', b, re.DOTALL)
+        if m:
+            times=int(eval_expr(Lexer(m.group(1))))
+            for _ in range(times):
+                try: run_action(m.group(2))
+                except ContinueLoop: continue
+                except BreakLoop: break
+            return
+    # === THIS LINE WAS MISSING - THIS IS THE FIX ===
+    run_action(b)
