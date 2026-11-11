@@ -465,19 +465,13 @@ def run_block(b):
             return
         raise SyntaxError('if syntax')
 
-    if b.startswith('while'):
+        if b.startswith('while'):
         m=re.match(r'while\s+(.+?):\s*\{(.*)\}\s*$', b, re.DOTALL)
         if m:
-            cond,body=m.groups()
-            while eval_expr(Lexer(cond)):
-                try:
-                    for s in get_stmts(body): run_action(s)
-                except ContinueLoop: continue
-                except BreakLoop: break
+            ...
             return
         m=re.match(r'while\s+(.+?):\s*(.+)\s*$', b, re.DOTALL)
         if m:
-            cond,single=m.groups()
-            while eval_expr(Lexer(cond)):
-                try: run_action(single)
-                except ContinueLoop: continue
+            ...
+            return
+        # <-- FILE STOPS HERE, NOTHING AFTER
