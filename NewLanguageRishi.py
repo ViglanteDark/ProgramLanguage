@@ -84,8 +84,6 @@ def exec_input_tokens(toks_nodot):
     return memory[var_name]
 
 def get_stmts(body):
-    # Depth-aware split: comma inside () [] {} = argument, NOT new statement
-    # comma at depth 0 = new statement
     parts=[]
     cur=""
     depth_paren=0
@@ -100,14 +98,12 @@ def get_stmts(body):
         elif c==']': depth_brack-=1
         elif c=='{': depth_brace+=1
         elif c=='}': depth_brace-=1
-        # split only when ALL depths are 0
         if (c==',' or c=='\n') and depth_paren==0 and depth_brack==0 and depth_brace==0:
             parts.append(cur); cur=""
         else:
             cur+=c
         i+=1
     if cur.strip(): parts.append(cur)
-
     out=[]
     for p in parts:
         p=p.strip()
@@ -167,14 +163,14 @@ def eval_expr(toks):
                 if depth>=1: cur.append(tk)
         if not inner: return []
         return [eval_expr(p) for p in inner]
-    toks=no_comma
+    toks=clean
     if toks and toks[0][0]=='FUNC':
         fname=toks[0][1]
         args_toks=[]; cur=[]; d=0
         for t in toks[1:]:
             if t[0]=='LPAREN': d+=1; cur.append(t)
             elif t[0]=='RPAREN': d-=1; cur.append(t)
-            elif t[0]=='COMMA' and d==0:
+            elif t[0]=='COMMA' and d==1:
                 args_toks.append(cur); cur=[]
             else: cur.append(t)
         if cur: args_toks.append(cur)
