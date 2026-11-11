@@ -1,4 +1,3 @@
-# app.py - POP Server, only built-in Python
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json, os, traceback, io, sys
 
@@ -6,9 +5,6 @@ POP = {}
 try:
     with open("NewLanguageRishi.py", "r", encoding="utf-8") as f:
         code_text = f.read()
-    # Cut ONLY the REPL loop at the very end - keep ALL functions
-    # REPL starts at the line: buf=""
-    # Find last occurrence of "\nbuf=\"\"\n"
     idx = code_text.rfind('\nbuf=""\n')
     if idx != -1:
         code_text = code_text[:idx]
@@ -30,14 +26,22 @@ def silent_clear():
         print("Clear error:", e)
 
 def run_pop_code(code):
-    print(f"DEBUG RECEIVED: {repr(code)}", flush=True)  # goes to Render logs, NOT to user
+    print(f"DEBUG RECEIVED: {repr(code)}", flush=True)
     code = code.strip()
     if not code:
-        print("DEBUG: code was EMPTY!", flush=True)
         return "(empty code received)"
     if code.strip() in ("clear.", "clear"):
         silent_clear()
         return "[session deleted - fresh start]"
+    if code.strip() in ("run.", "run"):
+        if POP.get('MAIN_BODIES'):
+            try:
+                _, merged = POP['FUNCTIONS']['main']
+                for s in POP['get_stmts'](merged):
+                    POP['run_action'](s)
+            except Exception as e:
+                print("Error in main:", e)
+        return None
     lines = code.split('\n')
     buf = ""
     for raw_line in lines:
@@ -50,7 +54,7 @@ def run_pop_code(code):
         buf = ""
         print(f"DEBUG RUNNING CHUNK: {repr(chunk)}", flush=True)
         try:
-            if 'run_block' in POP:
+            if 'run_block' in POP and callable(POP['run_block']):
                 POP['run_block'](chunk)
                 print(f"DEBUG run_block OK, memory={POP.get('memory')}", flush=True)
             elif 'run_action' in POP:
@@ -60,47 +64,10 @@ def run_pop_code(code):
                 print("DEBUG: NO run_block / run_action in POP!", flush=True)
         except Exception as e:
             print(f"DEBUG ERROR in chunk: {e}", flush=True)
-            import traceback; traceback.print_exc()
+            traceback.print_exc()
     if buf.strip():
         try: POP['run_block'](buf)
         except Exception as e: print(f"DEBUG ERROR leftover: {e}", flush=True)
-    return None
-
-    # Split into chunks, keep { } together
-    lines = code.split('\n')
-    buf = ""
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
-            continue
-        buf = line if not buf else buf + "\n" + line
-        # Wait if { not closed
-        if buf.count('{') > buf.count('}'):
-            continue
-        # Wait if ends with comma
-        if buf.strip().endswith(','):
-            continue
-        # Now run this one chunk
-        chunk = buf.strip()
-        buf = ""
-        try:
-            if 'run_block' in POP and callable(POP['run_block']):
-                POP['run_block'](chunk)
-            elif 'run_action' in POP:
-                # fallback: strip dot and use run_action
-                if chunk.endswith('.'):
-                    chunk = chunk[:-1]
-                POP['run_action'](chunk)
-            else:
-                print("Error: no run_block / run_action found")
-        except Exception as e:
-            print(f"Error: {e}")
-    # If leftover buf (unclosed {), try once
-    if buf.strip():
-        try:
-            POP['run_block'](buf)
-        except Exception as e:
-            print(f"Error: {e}")
     return None
 
 class Handler(BaseHTTPRequestHandler):
@@ -112,11 +79,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
-
     def do_GET(self):
         path = self.path
-        if path == "/":
-            path = "/index.html"
+        if path == "/": path = "/index.html"
         filename = path.lstrip("/")
         if filename in ["index.html", "style.css", "script.js"]:
             if os.path.exists(filename):
@@ -131,7 +96,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(json.dumps({"output": "[session deleted - fresh start]"}), 200, "application/json")
             return
         self._send("Not found", 404, "text/plain")
-
     def do_POST(self):
         if self.path == "/run":
             length = int(self.headers.get("Content-Length", 0))
@@ -166,14 +130,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(json.dumps({"output": "[session deleted - fresh start]"}), 200, "application/json")
             return
         self._send("Not found", 404, "text/plain")
-
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
-
     def log_message(self, format, *args):
         print(f"{self.address_string()} - {format % args}")
 
