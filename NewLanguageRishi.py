@@ -403,11 +403,14 @@ def run_block(b):
         _PENDING = ""
     if b.endswith('='): print(eval_expr(Lexer(b[:-1]))); return
     if not b.endswith('.'):
-        if '}' in b: b=b+'.'
-        elif b.strip().endswith(':') or b.strip().endswith(','):
+        balanced = b.count('{') == b.count('}') and b.count('(') == b.count(')') and b.count('[') == b.count(']')
+        if balanced and '}' in b:
+            b = b + '.'
+        elif b.strip().endswith(':') or b.strip().endswith(',') or not balanced:
             _PENDING = b
             return
-        else: raise SyntaxError('Need DOT.')
+        else:
+            raise SyntaxError('Need DOT.')
     raw=b[:-1].strip()
     raw = re.sub(r'\}\s*,\s*else', '} else', raw, flags=re.DOTALL)
     raw = re.sub(r'\}\s*\n\s*else', '} else', raw, flags=re.DOTALL)
