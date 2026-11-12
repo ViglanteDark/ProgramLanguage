@@ -55,6 +55,7 @@ memory={}
 FUNCTIONS={}
 MAIN_BODIES=[]
 MERGE_MAINS = True
+_PENDING = ""
 
 class BreakLoop(Exception): pass
 class ContinueLoop(Exception): pass
@@ -394,11 +395,18 @@ def run_action(code):
         return
 
 def run_block(b):
+    global _PENDING
     b=b.strip()
     if not b: return
+    if _PENDING:
+        b = _PENDING + "\n" + b
+        _PENDING = ""
     if b.endswith('='): print(eval_expr(Lexer(b[:-1]))); return
     if not b.endswith('.'):
         if '}' in b: b=b+'.'
+        elif b.strip().endswith(':') or b.strip().endswith(','):
+            _PENDING = b
+            return
         else: raise SyntaxError('Need DOT.')
     raw=b[:-1].strip()
     raw = re.sub(r'\}\s*,\s*else', '} else', raw, flags=re.DOTALL)
@@ -418,7 +426,6 @@ def run_block(b):
             FUNCTIONS[fname]= (params, body)
         return
     b=raw
-    # for(i=0, i<3, i=i+1): -> for i=0, i<3, i=i+1:
     if b.startswith('for'):
         m_paren = re.match(r'for\s*\(\s*(.+?)\s*\)\s*:\s*(.*)$', b, re.DOTALL)
         if m_paren:
@@ -530,7 +537,6 @@ def run_block(b):
             return
     run_action(b)
 
-# --- NEW: multiline-safe splitter ---
 def split_statements(text):
     stmts=[]; cur=""
     db=dp=dk=0; in_str=False
@@ -544,7 +550,6 @@ def split_statements(text):
             elif c=='[': dk+=1
             elif c==']': dk-=1
         cur+=c
-        # '.' is a terminator only if NOT a decimal like 3.5
         is_decimal = False
         if c=='.' and idx>0 and idx+1 < len(text):
             if text[idx-1].isdigit() and text[idx+1].isdigit():
@@ -580,7 +585,6 @@ while True:
     if c.strip()=="" and buf:
         run_code(buf); buf=""; continue
     buf = c if not buf else buf + "\n" + c
-    # Run only when buf is a complete statement (ends with . at depth 0)
     if buf.strip().endswith('.'):
         stmts = split_statements(buf)
         if stmts and buf.strip() == stmts[-1]:
